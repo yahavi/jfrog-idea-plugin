@@ -26,6 +26,10 @@ public class Logger implements Log {
         return ServiceManager.getService(project, Logger.class);
     }
 
+    public static Logger getInstance() {
+        return ServiceManager.getService(Logger.class);
+    }
+
     private Logger() {
     }
 

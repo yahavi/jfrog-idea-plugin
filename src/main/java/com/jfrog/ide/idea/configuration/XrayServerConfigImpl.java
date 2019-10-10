@@ -20,6 +20,8 @@
 package com.jfrog.ide.idea.configuration;
 
 import com.google.common.base.Objects;
+import com.intellij.ide.passwordSafe.PasswordSafe;
+import com.intellij.ide.passwordSafe.PasswordSafeException;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.PasswordUtil;
 import com.intellij.util.net.HttpConfigurable;
@@ -45,6 +47,7 @@ public class XrayServerConfigImpl implements XrayServerConfig {
     @OptionTag
     private String username;
     @Tag
+    @Deprecated
     private String password;
 
     XrayServerConfigImpl() {
@@ -91,12 +94,18 @@ public class XrayServerConfigImpl implements XrayServerConfig {
     @Override
     @CheckForNull
     public String getPassword() {
-        if (password == null) {
-            return null;
-        }
         try {
+            // Option 1 - Password from key store
+            String passwordFromStore = PasswordSafe.getInstance().getPassword(null, XrayServerConfig.class, "jfrog.xray.password");
+            if (passwordFromStore != null) {
+                return passwordFromStore;
+            }
+            // Option 2 - Password from PersistentStateComponent
+            if (password == null) {
+                return null;
+            }
             return PasswordUtil.decodePassword(password);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException | PasswordSafeException e) {
             return null;
         }
     }
@@ -109,8 +118,8 @@ public class XrayServerConfigImpl implements XrayServerConfig {
         this.username = username;
     }
 
-    void setPassword(String password) {
-        this.password = PasswordUtil.encodePassword(password);
+    void setPassword(String password) throws PasswordSafeException {
+        PasswordSafe.getInstance().storePassword(null, XrayServerConfig.class, "jfrog.xray.password", password);
     }
 
     @Override

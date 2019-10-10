@@ -19,6 +19,7 @@
  */
 package com.jfrog.ide.idea.configuration;
 
+import com.intellij.ide.passwordSafe.PasswordSafeException;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ApplicationComponent;
 import com.intellij.openapi.components.PersistentStateComponent;
@@ -52,7 +53,7 @@ public final class GlobalSettings extends ApplicationComponent.Adapter implement
         return this.xrayConfig;
     }
 
-    public void setXrayConfig(XrayServerConfigImpl xrayConfig) {
+    public void setXrayConfig(XrayServerConfigImpl xrayConfig) throws PasswordSafeException {
         this.xrayConfig.setUrl(xrayConfig.getUrl());
         this.xrayConfig.setUsername(xrayConfig.getUsername());
         this.xrayConfig.setPassword(xrayConfig.getPassword());
