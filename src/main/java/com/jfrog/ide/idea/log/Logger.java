@@ -3,7 +3,7 @@ package com.jfrog.ide.idea.log;
 import com.intellij.notification.*;
 import com.intellij.openapi.components.ServiceManager;
 import org.apache.commons.lang3.StringUtils;
-import org.codehaus.plexus.util.ExceptionUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.jfrog.build.api.util.Log;
 
 /**
@@ -59,7 +59,7 @@ public class Logger implements Log {
         ideaLogger.error(message, t);
         NotificationType notificationType = NotificationType.ERROR;
         popupBalloon(message, notificationType);
-        String title = StringUtils.defaultIfBlank(t.getMessage(), ERROR_TITLE);
+        String title = StringUtils.defaultIfBlank(ExceptionUtils.getRootCauseMessage(t), ERROR_TITLE);
         log(title, message + System.lineSeparator() + ExceptionUtils.getStackTrace(t), notificationType);
     }
 

@@ -13,6 +13,7 @@ import com.intellij.openapi.externalSystem.model.project.dependencies.ArtifactDe
 import com.intellij.openapi.externalSystem.model.project.dependencies.ComponentDependencies;
 import com.intellij.openapi.externalSystem.model.project.dependencies.DependencyNode;
 import com.intellij.openapi.externalSystem.model.project.dependencies.ProjectDependencies;
+import com.intellij.openapi.externalSystem.model.task.ExternalSystemTask;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskType;
 import com.intellij.openapi.externalSystem.service.execution.ProgressExecutionMode;
 import com.intellij.openapi.externalSystem.service.internal.ExternalSystemProcessingManager;
@@ -30,6 +31,7 @@ import com.jfrog.ide.idea.inspections.GradleInspection;
 import com.jfrog.ide.idea.utils.Utils;
 import com.jfrog.xray.client.impl.services.summary.ComponentDetailImpl;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.settings.GradleSettings;
@@ -81,7 +83,7 @@ public class GradleScanManager extends ScanManager {
                             .map(Paths::get)
                             .collect(Collectors.toSet())));
         } else {
-            getLog().warn("Gradle state is null");
+            getLog().warn("Gradle state is null for '" + getProjectName() + "'.");
         }
         return paths;
     }
@@ -97,11 +99,23 @@ public class GradleScanManager extends ScanManager {
             return;
         }
         ExternalSystemProcessingManager processingManager = ServiceManager.getService(ExternalSystemProcessingManager.class);
-        if (processingManager != null && processingManager.findTask(ExternalSystemTaskType.RESOLVE_PROJECT, GradleConstants.SYSTEM_ID, getProjectBasePath(project).toString()) != null) {
+        if (processingManager == null) {
+            return;
+        }
+        ExternalSystemTask task = processingManager.findTask(ExternalSystemTaskType.RESOLVE_PROJECT, GradleConstants.SYSTEM_ID, getProjectBasePath(project).toString());
+        if (task != null) {
+            getLog().debug("Gradle refresh is already in process. " + task.getId());
+            Throwable throwable = task.getError();
+            if (throwable != null) {
+                getLog().debug("Former Gradle task encountered an error " + ExceptionUtils.getRootCauseMessage(throwable));
+            }
             // Another scan in progress
             return;
         }
+
+        getLog().debug("Refreshing Gradle dependencies for '" + getProjectName() + "'.");
         ExternalSystemUtil.refreshProject(project, GradleConstants.SYSTEM_ID, getProjectBasePath(project).toString(), cbk, false, ProgressExecutionMode.IN_BACKGROUND_ASYNC);
+        getLog().debug("Gradle dependencies refreshed successfully.");
     }
 
     @Override
@@ -122,6 +136,7 @@ public class GradleScanManager extends ScanManager {
 
     @Override
     protected void buildTree(@Nullable DataNode<ProjectData> externalProject) {
+        getLog().debug("Building Gradle dependency tree for '" + getProjectName() + "'.");
         collectDependenciesIfMissing(externalProject);
         dependenciesData.forEach(this::populateModulesWithDependencies);
         DependenciesTree rootNode = new DependenciesTree(project.getName());
@@ -201,7 +216,9 @@ public class GradleScanManager extends ScanManager {
     }
 
     private void collectDependenciesData(DataNode<ProjectData> externalProject) {
+        getLog().debug("Collecting dependencies data for '" + externalProject.toString() + "'.");
         this.dependenciesData = ExternalSystemApiUtil.findAllRecursively(externalProject, ProjectKeys.DEPENDENCIES_GRAPH);
+        getLog().debug(this.dependenciesData.size() + " dependencies collected for project");
     }
 
     private static String getModuleId(DataNode<ProjectDependencies> dataNode) {

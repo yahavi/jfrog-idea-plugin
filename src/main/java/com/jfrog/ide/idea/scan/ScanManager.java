@@ -12,6 +12,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.externalSystem.model.DataNode;
 import com.intellij.openapi.externalSystem.model.project.ProjectData;
 import com.intellij.openapi.externalSystem.model.project.dependencies.ProjectDependencies;
+import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskId;
 import com.intellij.openapi.externalSystem.service.project.ExternalProjectRefreshCallback;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -57,6 +58,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.apache.commons.lang3.StringUtils.isNotBlank;
+
 /**
  * Created by romang on 4/26/17.
  */
@@ -79,7 +82,9 @@ public abstract class ScanManager extends ScanManagerBase {
         super(HOME_PATH.resolve("cache"), project.getName(), Logger.getInstance(), GlobalSettings.getInstance().getXrayConfig(), prefix);
         this.mainProject = mainProject;
         this.project = project;
+        getLog().debug("HOME_PATH: " + HOME_PATH.toAbsolutePath());
         Files.createDirectories(HOME_PATH);
+        getLog().debug(HOME_PATH.toAbsolutePath() + " directory created.");
         registerOnChangeHandlers();
     }
 
@@ -182,11 +187,16 @@ public abstract class ScanManager extends ScanManagerBase {
             @Override
             public void onSuccess(@Nullable DataNode<ProjectData> externalProject) {
                 try {
+                    getLog().debug("Building dependencies tree for '" + getProjectName() + "'...");
                     buildTree(externalProject);
+                    getLog().debug("Xray scanning dependencies for '" + getProjectName() + "'...");
                     scanAndCacheArtifacts(indicator, quickScan);
+                    getLog().debug("Adding scanned dependencies for '" + getProjectName() + "'...");
                     addXrayInfoToTree(getScanResults());
+                    getLog().debug("Building scan results UI for '" + getProjectName() + "'...");
                     setScanResults();
                     DumbService.getInstance(mainProject).smartInvokeLater(() -> runInspections());
+                    getLog().debug("Xray Scan completed successfully.");
                 } catch (ProcessCanceledException e) {
                     getLog().info("Xray scan was canceled");
                 } catch (Exception e) {
@@ -195,8 +205,12 @@ public abstract class ScanManager extends ScanManagerBase {
             }
 
             @Override
-            public void onFailure(@NotNull String errorMessage, @Nullable String errorDetails) {
-                getLog().error(StringUtils.defaultIfEmpty(errorDetails, errorMessage));
+            public void onFailure(@NotNull ExternalSystemTaskId externalTaskId, @NotNull String errorMessage, @Nullable String errorDetails) {
+                getLog().error(errorMessage);
+                if (isNotBlank(errorDetails)) {
+                    getLog().info(errorDetails);
+                }
+                getLog().info("Task ID: " + externalTaskId.toString());
             }
         };
     }
