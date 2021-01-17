@@ -86,13 +86,13 @@ public abstract class ScanManager extends ScanManagerBase {
     /**
      * Refresh project dependencies.
      */
-    protected abstract void refreshDependencies(ExternalProjectRefreshCallback cbk, @Nullable Collection<DataNode<ProjectDependencies>> dependenciesData);
+    protected abstract void refreshDependencies(ExternalProjectRefreshCallback cbk);
 
     /**
      * Collect and return {@link Components} to be scanned by JFrog Xray.
      * Implementation should be project type specific.
      */
-    protected abstract void buildTree(@Nullable DataNode<ProjectData> externalProject) throws IOException;
+    protected abstract void buildTree() throws IOException;
 
     /**
      * Return all project descriptors under the scan-manager project, which need to be inspected by the corresponding {@link LocalInspectionTool}.
@@ -112,7 +112,7 @@ public abstract class ScanManager extends ScanManagerBase {
     /**
      * Scan and update dependency components.
      */
-    private void scanAndUpdate(boolean quickScan, ProgressIndicator indicator, @Nullable Collection<DataNode<ProjectDependencies>> dependenciesData) {
+    private void scanAndUpdate(boolean quickScan, ProgressIndicator indicator) {
         // Don't scan if Xray is not configured
         if (!GlobalSettings.getInstance().areCredentialsSet()) {
             getLog().error("Xray server is not configured.");
@@ -127,7 +127,7 @@ public abstract class ScanManager extends ScanManagerBase {
         }
         try {
             // Refresh dependencies -> Collect -> Scan and store to cache -> Update view
-            refreshDependencies(getRefreshDependenciesCbk(quickScan, indicator), dependenciesData);
+            refreshDependencies(getRefreshDependenciesCbk(quickScan, indicator));
         } finally {
             scanInProgress.set(false);
         }
@@ -136,8 +136,8 @@ public abstract class ScanManager extends ScanManagerBase {
     /**
      * Launch async dependency scan.
      */
-    void asyncScanAndUpdateResults(boolean quickScan, @Nullable Collection<DataNode<ProjectDependencies>> dependenciesData) {
-        if (DumbService.isDumb(mainProject)) { // If intellij is still indexing the project
+    public void asyncScanAndUpdateResults(boolean quickScan, boolean dependencyDataExist) {
+        if (!dependencyDataExist && DumbService.isDumb(mainProject)) { // If intellij is still indexing the project
             return;
         }
         Task.Backgroundable scanAndUpdateTask = new Task.Backgroundable(null, "Xray: Scanning for vulnerabilities...") {
@@ -146,7 +146,7 @@ public abstract class ScanManager extends ScanManagerBase {
                 if (project.isDisposed()) {
                     return;
                 }
-                scanAndUpdate(quickScan, new ProgressIndicatorImpl(indicator), dependenciesData);
+                scanAndUpdate(quickScan, new ProgressIndicatorImpl(indicator));
             }
         };
         // The progress manager is only good for foreground threads.
@@ -174,7 +174,7 @@ public abstract class ScanManager extends ScanManagerBase {
      * Launch async dependency scan.
      */
     void asyncScanAndUpdateResults() {
-        asyncScanAndUpdateResults(true, null);
+        asyncScanAndUpdateResults(true, false);
     }
 
     private ExternalProjectRefreshCallback getRefreshDependenciesCbk(boolean quickScan, ProgressIndicator indicator) {
@@ -182,7 +182,7 @@ public abstract class ScanManager extends ScanManagerBase {
             @Override
             public void onSuccess(@Nullable DataNode<ProjectData> externalProject) {
                 try {
-                    buildTree(externalProject);
+                    buildTree();
                     scanAndCacheArtifacts(indicator, quickScan);
                     addXrayInfoToTree(getScanResults());
                     setScanResults();

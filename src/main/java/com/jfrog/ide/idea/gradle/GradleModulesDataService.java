@@ -3,8 +3,8 @@ package com.jfrog.ide.idea.gradle;
 import com.intellij.openapi.externalSystem.model.DataNode;
 import com.intellij.openapi.externalSystem.model.Key;
 import com.intellij.openapi.externalSystem.model.ProjectKeys;
+import com.intellij.openapi.externalSystem.model.project.ModuleData;
 import com.intellij.openapi.externalSystem.model.project.ProjectData;
-import com.intellij.openapi.externalSystem.model.project.dependencies.ProjectDependencies;
 import com.intellij.openapi.externalSystem.service.project.IdeModifiableModelsProvider;
 import com.intellij.openapi.externalSystem.service.project.manage.AbstractProjectDataService;
 import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
@@ -13,7 +13,6 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.jfrog.ide.idea.configuration.GlobalSettings;
 import com.jfrog.ide.idea.scan.GradleScanManager;
-import com.jfrog.ide.idea.scan.ScanManager;
 import com.jfrog.ide.idea.scan.ScanManagersFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -25,12 +24,12 @@ import java.util.Collection;
  * Created by Yahav Itzhak on 9 Nov 2017.
  */
 @Order(ExternalSystemConstants.UNORDERED)
-public class GradleDependenciesDataService extends AbstractProjectDataService<ProjectDependencies, Module> {
+public class GradleModulesDataService extends AbstractProjectDataService<ModuleData, Module> {
 
     @NotNull
     @Override
-    public Key<ProjectDependencies> getTargetDataKey() {
-        return ProjectKeys.DEPENDENCIES_GRAPH;
+    public Key<ModuleData> getTargetDataKey() {
+        return ProjectKeys.MODULE;
     }
 
     /**
@@ -42,10 +41,7 @@ public class GradleDependenciesDataService extends AbstractProjectDataService<Pr
      * @param modelsProvider contains the project modules
      */
     @Override
-    public void importData(@NotNull Collection<DataNode<ProjectDependencies>> toImport,
-                           @Nullable ProjectData projectData,
-                           @NotNull Project project,
-                           @NotNull IdeModifiableModelsProvider modelsProvider) {
+    public void importData(@NotNull Collection<DataNode<ModuleData>> toImport, @Nullable ProjectData projectData, @NotNull Project project, @NotNull IdeModifiableModelsProvider modelsProvider) {
         if (projectData == null || !projectData.getOwner().equals(GradleConstants.SYSTEM_ID)) {
             return;
         }
@@ -54,19 +50,9 @@ public class GradleDependenciesDataService extends AbstractProjectDataService<Pr
             return;
         }
 
-        ScanManagersFactory scanManagersFactory = ScanManagersFactory.getInstance(project);
-
-        GradleScanManager scanManager = (GradleScanManager) scanManagersFactory.getScanManager(project);
+        GradleScanManager scanManager = (GradleScanManager) ScanManagersFactory.getInstance(project).getScanManager(project);
         if (scanManager != null) {
-            // Existing Gradle project
-            scanManager.setDependencyData(projectData.getExternalName(), toImport);
-            scanManager.projectResolved(projectData.getExternalName());
-            if (scanManager.areAllProjectsResolved()) {
-                scanManager.asyncScanAndUpdateResults(true, true);
-            }
-            return;
+            scanManager.setModulesData(projectData.getExternalName(), toImport);
         }
-        // New Gradle project
-        scanManagersFactory.startScan(true, false);
     }
 }

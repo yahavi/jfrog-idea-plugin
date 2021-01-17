@@ -1,9 +1,6 @@
 package com.jfrog.ide.idea.scan;
 
 import com.intellij.codeInspection.LocalInspectionTool;
-import com.intellij.openapi.externalSystem.model.DataNode;
-import com.intellij.openapi.externalSystem.model.project.ProjectData;
-import com.intellij.openapi.externalSystem.model.project.dependencies.ProjectDependencies;
 import com.intellij.openapi.externalSystem.service.project.ExternalProjectRefreshCallback;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -15,14 +12,12 @@ import com.jfrog.ide.common.npm.NpmTreeBuilder;
 import com.jfrog.ide.common.scan.ComponentPrefix;
 import com.jfrog.ide.idea.inspections.NpmInspection;
 import com.jfrog.ide.idea.projects.NpmProject;
-import com.jfrog.ide.idea.ui.filters.FilterManagerService;
 import com.jfrog.ide.idea.ui.ComponentsTree;
+import com.jfrog.ide.idea.ui.filters.FilterManagerService;
 import com.jfrog.ide.idea.utils.Utils;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Paths;
-import java.util.Collection;
 
 /**
  * Created by Yahav Itzhak on 13 Dec 2017.
@@ -44,12 +39,12 @@ public class NpmScanManager extends ScanManager {
     }
 
     @Override
-    protected void refreshDependencies(ExternalProjectRefreshCallback cbk, @Nullable Collection<DataNode<ProjectDependencies>> dependenciesData) {
+    protected void refreshDependencies(ExternalProjectRefreshCallback cbk) {
         cbk.onSuccess(null);
     }
 
     @Override
-    protected void buildTree(@Nullable DataNode<ProjectData> externalProject) throws IOException {
+    protected void buildTree() throws IOException {
         setScanResults(npmTreeBuilder.buildTree(getLog()));
     }
 
@@ -61,7 +56,7 @@ public class NpmScanManager extends ScanManager {
             return null;
         }
         PsiFile psiFile = PsiManager.getInstance(mainProject).findFile(file);
-        return new PsiFile[] {psiFile};
+        return new PsiFile[]{psiFile};
     }
 
     @Override

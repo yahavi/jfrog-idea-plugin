@@ -3,8 +3,6 @@ package com.jfrog.ide.idea.scan;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.intellij.openapi.components.ServiceManager;
-import com.intellij.openapi.externalSystem.model.DataNode;
-import com.intellij.openapi.externalSystem.model.project.dependencies.ProjectDependencies;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
@@ -17,7 +15,6 @@ import com.jfrog.ide.idea.projects.NpmProject;
 import com.jfrog.ide.idea.ui.ComponentsTree;
 import com.jfrog.ide.idea.utils.Utils;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -48,13 +45,23 @@ public class ScanManagersFactory {
     }
 
     /**
+     * Get a scan manager
+     *
+     * @param project - The project belongs to the scan manager
+     * @return the requested scan manager or null.
+     */
+    public ScanManager getScanManager(Project project) {
+        return scanManagers.get(Utils.getProjectIdentifier(project));
+    }
+
+    /**
      * Start an Xray scan for all projects.
      *
-     * @param quickScan        - True to allow usage of the scan cache.
-     * @param dependenciesData - Dependencies to use in Gradle scans.
+     * @param quickScan           - True to allow usage of the scan cache
+     * @param dependencyDataExist - True if dependency data already exist
      */
-    public void startScan(boolean quickScan, @Nullable Collection<DataNode<ProjectDependencies>> dependenciesData) {
-        if (DumbService.isDumb(mainProject)) { // If intellij is still indexing the project
+    public void startScan(boolean quickScan, boolean dependencyDataExist) {
+        if (!dependencyDataExist && DumbService.isDumb(mainProject)) { // If intellij is still indexing the project
             return;
         }
         if (isScanInProgress()) {
@@ -74,28 +81,11 @@ public class ScanManagersFactory {
             componentsTree.reset();
             NavigationService.clearNavigationMap(mainProject);
             for (ScanManager scanManager : scanManagers.values()) {
-                scanManager.asyncScanAndUpdateResults(quickScan, dependenciesData);
+                scanManager.asyncScanAndUpdateResults(quickScan, dependencyDataExist);
             }
         } catch (IOException | RuntimeException e) {
             Logger.getInstance().error("", e);
         }
-    }
-
-    /**
-     * Start an Xray scan after Gradle dependencies import.
-     * For known Gradle projects - Start scan only for the project.
-     * For new Gradle projects - Start a full scan.
-     *
-     * @param project          - The Gradle project
-     * @param dependenciesData - Gradle's dependencies
-     */
-    public void tryScanSingleProject(Project project, Collection<DataNode<ProjectDependencies>> dependenciesData) {
-        ScanManager scanManager = scanManagers.get(Utils.getProjectIdentifier(project));
-        if (scanManager != null) { // If Gradle project already exists
-            scanManager.asyncScanAndUpdateResults(true, dependenciesData);
-            return;
-        }
-        startScan(true, dependenciesData); // New Gradle project
     }
 
     /**

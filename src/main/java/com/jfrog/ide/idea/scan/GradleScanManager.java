@@ -5,10 +5,12 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.intellij.codeInspection.LocalInspectionTool;
 import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.externalSystem.importing.ImportSpecBuilder;
 import com.intellij.openapi.externalSystem.model.DataNode;
+import com.intellij.openapi.externalSystem.model.ExternalProjectInfo;
 import com.intellij.openapi.externalSystem.model.ProjectKeys;
+import com.intellij.openapi.externalSystem.model.project.AbstractNamedData;
 import com.intellij.openapi.externalSystem.model.project.ModuleData;
-import com.intellij.openapi.externalSystem.model.project.ProjectData;
 import com.intellij.openapi.externalSystem.model.project.dependencies.ArtifactDependencyNode;
 import com.intellij.openapi.externalSystem.model.project.dependencies.ComponentDependencies;
 import com.intellij.openapi.externalSystem.model.project.dependencies.DependencyNode;
@@ -17,8 +19,8 @@ import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskType;
 import com.intellij.openapi.externalSystem.service.execution.ProgressExecutionMode;
 import com.intellij.openapi.externalSystem.service.internal.ExternalSystemProcessingManager;
 import com.intellij.openapi.externalSystem.service.project.ExternalProjectRefreshCallback;
+import com.intellij.openapi.externalSystem.service.project.manage.ProjectDataManagerImpl;
 import com.intellij.openapi.externalSystem.settings.ExternalProjectSettings;
-import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil;
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -31,7 +33,6 @@ import com.jfrog.ide.idea.utils.Utils;
 import com.jfrog.xray.client.impl.services.summary.ComponentDetailImpl;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.settings.GradleSettings;
 import org.jetbrains.plugins.gradle.util.GradleConstants;
 import org.jfrog.build.extractor.scan.DependenciesTree;
@@ -52,8 +53,9 @@ import static com.jfrog.ide.idea.utils.Utils.getProjectBasePath;
  */
 public class GradleScanManager extends ScanManager {
 
-    private Collection<DataNode<ProjectDependencies>> dependenciesData;
-    private Map<String, DependenciesTree> modules = Maps.newHashMap();
+    private Map<String, Collection<DataNode<ProjectDependencies>>> projectDependencies = Maps.newHashMap();
+    private Map<String, Collection<DataNode<ModuleData>>> moduleData = Maps.newHashMap();
+    private Map<String, Boolean> projectResolved = Maps.newHashMap();
 
     GradleScanManager(Project project) throws IOException {
         super(project, project, ComponentPrefix.GAV);
@@ -86,22 +88,58 @@ public class GradleScanManager extends ScanManager {
         return paths;
     }
 
-    @Override
-    protected void refreshDependencies(ExternalProjectRefreshCallback cbk, @Nullable Collection<DataNode<ProjectDependencies>> dependenciesData) {
-        if (dependenciesData != null) {
-            // Change the dependencies only if there are new dependencies
-            this.dependenciesData = dependenciesData;
+    public boolean areAllProjectsResolved() {
+        return !projectResolved.containsValue(Boolean.FALSE);
+    }
+
+    public void projectResolved(String projectId) {
+        if (projectResolved.isEmpty()) {
+            Collection<ExternalProjectInfo> externalProjectInfos = ProjectDataManagerImpl.getInstance().getExternalProjectsData(project, GradleConstants.SYSTEM_ID);
+            projectResolved = externalProjectInfos.stream()
+                    .map(ExternalProjectInfo::getExternalProjectStructure)
+                    .filter(Objects::nonNull)
+                    .map(DataNode::getData)
+                    .collect(Collectors.toMap(AbstractNamedData::getExternalName, (externalProjectInfo) -> Boolean.FALSE));
         }
-        if (this.dependenciesData != null) {
+        projectResolved.replace(projectId, true);
+    }
+
+    /**
+     * Set the dependency data after Gradle dependencies refresh.
+     * This function is called after {@link com.jfrog.ide.idea.gradle.GradleDependenciesDataService#importData}
+     *
+     * @param dependencyData - The dependencies data
+     */
+    public void setDependencyData(String projectId, Collection<DataNode<ProjectDependencies>> dependencyData) {
+        this.projectDependencies.put(projectId, dependencyData);
+    }
+
+    /**
+     * Set the dependencies data after Gradle dependencies refresh.
+     * This function is called after {@link com.jfrog.ide.idea.gradle.GradleModulesDataService#importData}
+     *
+     * @param modulesData - The modules data
+     */
+    public void setModulesData(String projectId, Collection<DataNode<ModuleData>> modulesData) {
+        this.moduleData.put(projectId, modulesData);
+    }
+
+    @Override
+    protected void refreshDependencies(ExternalProjectRefreshCallback cbk) {
+        if (!projectDependencies.isEmpty() && !moduleData.isEmpty()) {
             cbk.onSuccess(null);
             return;
         }
+
+
+        String projectBasePath = getProjectBasePath(project).toString();
         ExternalSystemProcessingManager processingManager = ServiceManager.getService(ExternalSystemProcessingManager.class);
-        if (processingManager != null && processingManager.findTask(ExternalSystemTaskType.RESOLVE_PROJECT, GradleConstants.SYSTEM_ID, getProjectBasePath(project).toString()) != null) {
+        if (processingManager != null && processingManager.findTask(ExternalSystemTaskType.RESOLVE_PROJECT, GradleConstants.SYSTEM_ID, projectBasePath) != null) {
             // Another scan in progress
             return;
         }
-        ExternalSystemUtil.refreshProject(project, GradleConstants.SYSTEM_ID, getProjectBasePath(project).toString(), cbk, false, ProgressExecutionMode.IN_BACKGROUND_ASYNC);
+        ImportSpecBuilder builder = new ImportSpecBuilder(project, GradleConstants.SYSTEM_ID).use(ProgressExecutionMode.IN_BACKGROUND_ASYNC).forceWhenUptodate();
+        ExternalSystemUtil.refreshProject(projectBasePath, builder);
     }
 
     @Override
@@ -121,25 +159,38 @@ public class GradleScanManager extends ScanManager {
     }
 
     @Override
-    protected void buildTree(@Nullable DataNode<ProjectData> externalProject) {
-        collectDependenciesIfMissing(externalProject);
-        dependenciesData.forEach(this::populateModulesWithDependencies);
+    protected void buildTree() {
         DependenciesTree rootNode = new DependenciesTree(project.getName());
-        modules.values().forEach(rootNode::add);
         GeneralInfo generalInfo = new GeneralInfo().name(project.getName()).path(Utils.getProjectBasePath(project).toString());
         rootNode.setGeneralInfo(generalInfo);
+
+        projectDependencies.forEach((projectSystemId, dataNodes) -> {
+            DependenciesTree projectNode = new DependenciesTree(projectSystemId);
+            Map<String, DependenciesTree> moduleDependencyTree = createModuleDependencyTree(moduleData.get(projectSystemId));
+            moduleDependencyTree.values().forEach(projectNode::add);
+            dataNodes.forEach(dataNode -> populateModulesWithDependencies(dataNode, moduleDependencyTree));
+            if (projectNode.getChildren().size() == 1) {
+                projectNode = (DependenciesTree) projectNode.getChildAt(0);
+            }
+            rootNode.add(projectNode);
+        });
+
         if (rootNode.getChildren().size() == 1) {
             setScanResults((DependenciesTree) rootNode.getChildAt(0));
         } else {
             setScanResults(rootNode);
         }
+        setScanResults(rootNode);
+        projectDependencies = Maps.newHashMap();
+        moduleData = Maps.newHashMap();
+        projectResolved = Maps.newHashMap();
     }
 
-    private void populateModulesWithDependencies(DataNode<ProjectDependencies> dataNode) {
+    private void populateModulesWithDependencies(DataNode<ProjectDependencies> dataNode, Map<String, DependenciesTree> moduleDependencyTree) {
         Multimap<DependencyNode, Scope> moduleDependencies = HashMultimap.create();
         ProjectDependencies projectDependencies = dataNode.getData();
         String moduleId = getModuleId(dataNode);
-        if (!modules.containsKey(moduleId)) {
+        if (!moduleDependencyTree.containsKey(moduleId)) {
             return;
         }
 
@@ -150,7 +201,20 @@ public class GradleScanManager extends ScanManager {
                     .forEach(dependencyNode -> moduleDependencies.put(dependencyNode, new Scope(componentDependency.getComponentName())));
         }
         // Populate dependencies-tree for all modules.
-        moduleDependencies.asMap().forEach((key, value) -> populateDependenciesTree(modules.get(moduleId), key, (Set<Scope>) value));
+        moduleDependencies.asMap().forEach((key, value) -> populateDependenciesTree(moduleDependencyTree.get(moduleId), key, (Set<Scope>) value));
+    }
+
+    private Map<String, DependenciesTree> createModuleDependencyTree(Collection<DataNode<ModuleData>> moduleData) {
+        Map<String, DependenciesTree> moduleDependencyTree = Maps.newHashMap();
+        moduleData.stream().map(DataNode::getData).forEach(module -> {
+            String groupId = Objects.toString(module.getGroup(), "");
+            String artifactId = StringUtils.removeStart(module.getId(), ":");
+            String version = Objects.toString(module.getVersion(), "");
+            DependenciesTree scanTreeNode = new DependenciesTree(artifactId);
+            scanTreeNode.setGeneralInfo(new GeneralInfo().pkgType("gradle").groupId(groupId).artifactId(artifactId).version(version));
+            moduleDependencyTree.put(StringUtils.removeStart(module.getId(), ":"), scanTreeNode);
+        });
+        return moduleDependencyTree;
     }
 
     private void populateDependenciesTree(DependenciesTree dependenciesTree, DependencyNode dependencyNode, Set<Scope> scopes) {
@@ -171,37 +235,6 @@ public class GradleScanManager extends ScanManager {
 
     private static boolean isArtifactDependencyNode(DependencyNode dependencyNode) {
         return dependencyNode instanceof ArtifactDependencyNode;
-    }
-
-    private void collectDependenciesIfMissing(DataNode<ProjectData> externalProject) {
-        if (dependenciesData == null) {
-            collectModuleDependencies(externalProject);
-            collectDependenciesData(externalProject);
-        } else {
-            modules.values().forEach(child -> child.getChildren().clear());
-        }
-    }
-
-    /**
-     * Collect Gradle modules dependencies. Used in user click on the refresh button.
-     *
-     * @param externalProject - The Gradle root node
-     */
-    private void collectModuleDependencies(DataNode<ProjectData> externalProject) {
-        Collection<DataNode<ModuleData>> moduleDependencies = ExternalSystemApiUtil.findAllRecursively(externalProject, ProjectKeys.MODULE);
-        modules = Maps.newHashMap();
-        moduleDependencies.forEach(module -> {
-            String groupId = Objects.toString(module.getData().getGroup(), "");
-            String artifactId = StringUtils.removeStart(module.getData().getId(), ":");
-            String version = Objects.toString(module.getData().getVersion(), "");
-            DependenciesTree scanTreeNode = new DependenciesTree(artifactId);
-            scanTreeNode.setGeneralInfo(new GeneralInfo().pkgType("gradle").groupId(groupId).artifactId(artifactId).version(version));
-            modules.put(StringUtils.removeStart(module.getData().getId(), ":"), scanTreeNode);
-        });
-    }
-
-    private void collectDependenciesData(DataNode<ProjectData> externalProject) {
-        this.dependenciesData = ExternalSystemApiUtil.findAllRecursively(externalProject, ProjectKeys.DEPENDENCIES_GRAPH);
     }
 
     private static String getModuleId(DataNode<ProjectDependencies> dataNode) {
